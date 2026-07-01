@@ -1,0 +1,44 @@
+name: Build Romanian food database
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # upload release assets
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Refuse to publish if the usable-product count drops below 70% of the
+      # previous release — a sharply smaller dataset means a bad upstream dump.
+      - name: Determine minimum count from previous release
+        id: guard
+        run: |
+          PREV=$(curl -sfL "https://github.com/${{ github.repository }}/releases/download/ro-food-db/manifest.json" | jq -r '.count' || echo 0)
+          MIN=$(( PREV * 7 / 10 ))
+          [ "$MIN" -lt 1000 ] && MIN=1000
+          echo "prev=$PREV min=$MIN"
+          echo "min=$MIN" >> "$GITHUB_OUTPUT"
+
+      - name: Build database
+        run: python3 scripts/build_ro_food_db.py --min-count ${{ steps.guard.outputs.min }}
+
+      - name: Publish to fixed-tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ro-food-db --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create ro-food-db --repo "${{ github.repository }}" \
+              --title "Romanian food database" \
+              --notes "Auto-built weekly from the Open Food Facts CSV export. Data © Open Food Facts contributors (ODbL)."
+          gh release upload ro-food-db dist/ro-foods.sqlite.gz dist/manifest.json \
+            --repo "${{ github.repository }}" --clobber
