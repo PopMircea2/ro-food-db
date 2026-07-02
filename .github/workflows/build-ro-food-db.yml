@@ -62,3 +62,12 @@ jobs:
               --notes "Auto-built weekly from the Open Food Facts CSV export. Data © Open Food Facts contributors (ODbL)."
           gh release upload ro-food-db dist/ro-foods.sqlite.gz dist/manifest.json \
             --repo "${{ github.repository }}" --clobber
+
+      # Mirror the dataset into Supabase — the app's sync source going
+      # forward. Runs after the release upload so a Supabase outage never
+      # blocks the release path (which pre-Supabase app versions still use).
+      - name: Upsert into Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python3 scripts/upsert_supabase.py
