@@ -9,7 +9,13 @@ non-zero macro, and publishes to the fixed-tag
 
 - `ro-foods.sqlite.gz` — SQLite database with an FTS5 index
   (`unicode61 remove_diacritics 2`, so `branza` matches `brânză`)
-- `manifest.json` — `{version, count, sha256, bytes, url}` for update checks
+- `manifest.json` — `{version, count, staples, sha256, bytes, url}` for update checks
+
+The database also carries a `staples` table — curated generic foods
+(piept de pui, orez fiert, sarmale) that OFF's packaged-goods data lacks.
+It is edited as a Notion database, pulled into [`staples.csv`](staples.csv)
+by `scripts/sync_staples.py` on every build, and searched first by the app.
+Macro sources per row: USDA FoodData Central, CIQUAL, or reviewed estimates.
 
 Build locally (stdlib-only, streams ~1 GB):
 
