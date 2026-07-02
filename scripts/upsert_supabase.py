@@ -61,10 +61,13 @@ def food_rows(db):
             "package_qty": quantity,
             "serving_size": serving,        # numeric, normalised to g/ml
             "serving_text": serving_size,   # display text, e.g. "30 g"
-            "kcal_100g": kcal,
-            "protein_100g": protein,
-            "carbs_100g": carbs,
-            "fat_100g": fat,
+            # OFF products may report only some macros (usable() requires just
+            # one non-zero); the foods columns are NOT NULL, and the app reads
+            # missing macros as 0 anyway.
+            "kcal_100g": kcal or 0,
+            "protein_100g": protein or 0,
+            "carbs_100g": carbs or 0,
+            "fat_100g": fat or 0,
             "source": "off",
             "country": "ro",
         }
