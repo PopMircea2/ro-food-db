@@ -38,27 +38,15 @@ jobs:
             git push
           fi
 
-      # Refuse to publish if the usable-product count drops below 70% of the
-      # previous release — a sharply smaller dataset means a bad upstream dump.
-      - name: Determine minimum count from previous release
-        id: guard
-        run: |
-          PREV=$(curl -sfL "https://github.com/${{ github.repository }}/releases/download/ro-food-db/manifest.json" | jq -r '.count' || echo 0)
-          MIN=$(( PREV * 7 / 10 ))
-          [ "$MIN" -lt 1000 ] && MIN=1000
-          echo "prev=$PREV min=$MIN"
-          echo "min=$MIN" >> "$GITHUB_OUTPUT"
-
+      # The default --min-count guards against a bad upstream dump. Upserts
+      # never delete, so a suspiciously small dataset can't erase existing
+      # rows in Supabase anyway — it would just update fewer of them.
       - name: Build database
-        run: python3 scripts/build_ro_food_db.py --min-count ${{ steps.guard.outputs.min }}
+        run: python3 scripts/build_ro_food_db.py
 
-      - name: Publish to fixed-tag release
+      # Mirror the dataset into Supabase — the app queries it directly.
+      - name: Upsert into Supabase
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view ro-food-db --repo "${{ github.repository }}" >/dev/null 2>&1 || \
-            gh release create ro-food-db --repo "${{ github.repository }}" \
-              --title "Romanian food database" \
-              --notes "Auto-built weekly from the Open Food Facts CSV export. Data © Open Food Facts contributors (ODbL)."
-          gh release upload ro-food-db dist/ro-foods.sqlite.gz dist/manifest.json \
-            --repo "${{ github.repository }}" --clobber
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python3 scripts/upsert_supabase.py
