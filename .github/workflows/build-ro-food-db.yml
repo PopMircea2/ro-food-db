@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # upload release assets
+  contents: read
 
 jobs:
   build:
@@ -18,26 +18,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Pull the curated staples table from Notion. A failure here (Notion
-      # down, token revoked) must not block the weekly OFF rebuild — warn and
-      # build with the committed staples.csv instead.
-      - name: Sync staples from Notion
-        env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-        run: |
-          python3 scripts/sync_staples.py || \
-            echo "::warning::Notion sync failed — building with committed staples.csv"
-
-      - name: Commit staples.csv if changed
-        run: |
-          if ! git diff --quiet -- staples.csv; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add staples.csv
-            git commit -m "Sync staples.csv from Notion"
-            git push
-          fi
-
       # The default --min-count guards against a bad upstream dump. Upserts
       # never delete, so a suspiciously small dataset can't erase existing
       # rows in Supabase anyway — it would just update fewer of them.
@@ -45,6 +25,7 @@ jobs:
         run: python3 scripts/build_ro_food_db.py
 
       # Mirror the dataset into Supabase — the app queries it directly.
+      # Only the foods table; staples and recipes are authored in Supabase.
       - name: Upsert into Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

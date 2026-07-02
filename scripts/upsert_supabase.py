@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Mirror the built database into Supabase — the app's sync source.
+"""Mirror the built dataset into Supabase — the app queries it directly.
 
 Reads dist/ro-foods.sqlite (produced by build_ro_food_db.py, so the same
 filters and dedup already applied) and upserts every row into the Supabase
-`foods` and `staples` tables via PostgREST. The app delta-syncs on
-`updated_at`; change-aware triggers on the tables make sure re-upserting an
-unchanged row does NOT bump it, so weekly runs stay cheap for devices.
+`foods` table via PostgREST, keyed on barcode.
+
+Only `foods` is machine-owned. The `staples` and `recipes` tables are
+authored directly in Supabase's table editor and must never be written here.
 
 Env (GitHub Action secrets):
     SUPABASE_URL         https://<project>.supabase.co
@@ -73,19 +74,6 @@ def food_rows(db):
         }
 
 
-def staple_rows(db):
-    for (slug, name, aliases, category, kcal, protein, carbs, fat,
-         portion_g, portion_label) in db.execute(
-            "SELECT slug, name, aliases, category, kcal_100g, protein_100g, "
-            "carbs_100g, fat_100g, portion_g, portion_label FROM staples"):
-        yield {
-            "slug": slug, "name": name, "aliases": aliases,
-            "category": category, "kcal_100g": kcal,
-            "protein_100g": protein, "carbs_100g": carbs, "fat_100g": fat,
-            "portion_g": portion_g, "portion_label": portion_label,
-        }
-
-
 def main() -> int:
     base = os.environ["SUPABASE_URL"].rstrip("/")
     secret = os.environ["SUPABASE_SECRET_KEY"]
@@ -98,7 +86,6 @@ def main() -> int:
 
     db = sqlite3.connect(db_path)
     upsert(base, secret, "foods", "barcode", list(food_rows(db)))
-    upsert(base, secret, "staples", "slug", list(staple_rows(db)))
     db.close()
     return 0
 
