@@ -16,6 +16,7 @@ Data is © Open Food Facts contributors, ODbL — the app shows attribution.
 """
 
 import argparse
+import csv
 import gzip
 import hashlib
 import json
@@ -86,7 +87,38 @@ SCHEMA = """
       name, brands, content='products', content_rowid='rowid',
       tokenize = "unicode61 remove_diacritics 2"
     );
+    -- Curated generic staples (piept de pui, orez fiert, sarmale) that OFF's
+    -- packaged-goods data lacks — synced from Notion into staples.csv by
+    -- scripts/sync_staples.py. The app searches this tier first.
+    CREATE TABLE staples(
+      slug TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      aliases TEXT,
+      category TEXT,
+      kcal_100g REAL NOT NULL,
+      protein_100g REAL NOT NULL,
+      carbs_100g REAL NOT NULL,
+      fat_100g REAL NOT NULL,
+      portion_g REAL,
+      portion_label TEXT
+    );
+    CREATE VIRTUAL TABLE staples_fts USING fts5(
+      name, aliases, content='staples', content_rowid='rowid',
+      tokenize = "unicode61 remove_diacritics 2"
+    );
 """
+
+
+def staple_rows(path):
+    """Rows of staples.csv in staples-table column order."""
+    with open(path, encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            yield (r["slug"], r["name"], r["aliases"] or None,
+                   r["category"] or None,
+                   float(r["kcal_100g"]), float(r["protein_100g"]),
+                   float(r["carbs_100g"]), float(r["fat_100g"]),
+                   float(r["portion_g"]) if r["portion_g"] else None,
+                   r["portion_label"] or None)
 
 
 def usable(row) -> bool:
@@ -105,7 +137,11 @@ def main() -> int:
                     "releases/download/ro-food-db/ro-foods.sqlite.gz")
     ap.add_argument("--csv", default=CSV_URL,
                     help="export URL or local .csv.gz path (for testing)")
+    ap.add_argument("--staples", default=str(Path(__file__).resolve().parent.parent
+                    / "staples.csv"), help="curated staples CSV (see sync_staples.py)")
     args = ap.parse_args()
+
+    staples = list(staple_rows(args.staples))
 
     print(f"streaming {args.csv} ...", flush=True)
     total, kept = 0, []
@@ -134,6 +170,9 @@ def main() -> int:
     )
     db.execute("INSERT INTO products_fts(products_fts) VALUES ('rebuild')")
     db.execute("INSERT INTO products_fts(products_fts) VALUES ('optimize')")
+    db.executemany("INSERT INTO staples VALUES (?,?,?,?,?,?,?,?,?,?)", staples)
+    db.execute("INSERT INTO staples_fts(staples_fts) VALUES ('rebuild')")
+    db.execute("INSERT INTO staples_fts(staples_fts) VALUES ('optimize')")
     db.commit()
     count = db.execute("SELECT count(*) FROM products").fetchone()[0]
     db.execute("VACUUM")
@@ -147,6 +186,7 @@ def main() -> int:
     manifest = {
         "version": date.today().isoformat(),
         "count": count,
+        "staples": len(staples),
         "sha256": sha,
         # uncompressed size: lets the app inflate with a single preallocated buffer
         "bytes": db_path.stat().st_size,
@@ -154,7 +194,8 @@ def main() -> int:
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"wrote {db_path} ({db_path.stat().st_size:,} B), "
-          f"{gz_path} ({gz_path.stat().st_size:,} B), {count} products")
+          f"{gz_path} ({gz_path.stat().st_size:,} B), "
+          f"{count} products + {len(staples)} staples")
     print(json.dumps(manifest, indent=2))
     return 0
 
