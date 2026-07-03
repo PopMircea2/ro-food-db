@@ -16,6 +16,7 @@ Data is © Open Food Facts contributors, ODbL — the app shows attribution.
 
 import argparse
 import gzip
+import math
 import sqlite3
 import sys
 import urllib.request
@@ -33,10 +34,14 @@ COLUMNS = ["code", "product_name", "brands", "quantity", "serving_quantity",
 
 
 def _num(s):
+    # float() accepts "inf"/"nan"/"1e999"; a non-finite value would pass the
+    # usable() filter (inf > 0) and later break the Supabase upsert, since
+    # json.dumps serialises it as Infinity — invalid JSON PostgREST rejects.
     try:
-        return float(s)
+        f = float(s)
     except ValueError:
         return None
+    return f if math.isfinite(f) else None
 
 
 def romanian_rows(source):

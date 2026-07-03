@@ -16,13 +16,20 @@ Stdlib-only, like the rest of the pipeline.
 """
 
 import json
+import math
 import os
+import re
 import sqlite3
 import sys
 import urllib.request
 from pathlib import Path
 
 BATCH = 500
+
+# Unit inside the serving display text, e.g. "30 g" or "2 biscuits (25 ml)".
+# The bulk CSV export has no serving_quantity_unit column (checked 2026-07-03),
+# so this is the only unit source available to the pipeline.
+SERVING_UNIT_RE = re.compile(r"\d\s*(g|ml)\b", re.IGNORECASE)
 
 
 def upsert(base, key, table, conflict, rows):
@@ -45,6 +52,13 @@ def upsert(base, key, table, conflict, rows):
     print(f"upserted {len(rows)} rows into {table}")
 
 
+def _finite(v, default=None):
+    """Non-finite floats serialise as Infinity/NaN — invalid JSON that fails
+    the whole PostgREST batch. build's _num filters them, but guard here too:
+    this is the boundary where a stray value actually breaks the sync."""
+    return v if v is not None and math.isfinite(v) else default
+
+
 def food_rows(db):
     for (code, name, brands, quantity, serving_quantity, serving_size,
          kcal, protein, carbs, fat) in db.execute(
@@ -52,23 +66,25 @@ def food_rows(db):
             "serving_size, kcal_100g, protein_100g, carbs_100g, fat_100g "
             "FROM products"):
         try:
-            serving = float(serving_quantity) if serving_quantity else None
+            serving = _finite(float(serving_quantity)) if serving_quantity else None
         except ValueError:
             serving = None
+        unit = SERVING_UNIT_RE.search(serving_size or "")
         yield {
             "barcode": code,
             "name": name,
             "brand": brands,
             "package_qty": quantity,
             "serving_size": serving,        # numeric, normalised to g/ml
+            "serving_unit": unit.group(1).lower() if unit else None,
             "serving_text": serving_size,   # display text, e.g. "30 g"
             # OFF products may report only some macros (usable() requires just
             # one non-zero); the foods columns are NOT NULL, and the app reads
             # missing macros as 0 anyway.
-            "kcal_100g": kcal or 0,
-            "protein_100g": protein or 0,
-            "carbs_100g": carbs or 0,
-            "fat_100g": fat or 0,
+            "kcal_100g": _finite(kcal, 0),
+            "protein_100g": _finite(protein, 0),
+            "carbs_100g": _finite(carbs, 0),
+            "fat_100g": _finite(fat, 0),
             "source": "off",
             "country": "ro",
         }
